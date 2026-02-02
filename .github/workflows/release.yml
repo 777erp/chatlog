@@ -8,11 +8,6 @@ on:
         description: '版本号 (格式: v1.2.3)'
         required: true
         default: 'v0.0.0'
-      skip_docker:
-        description: '跳过Docker构建'
-        required: false
-        type: boolean
-        default: false
       snapshot:
         description: '创建快照版本 (不创建GitHub Release)'
         required: false
@@ -24,20 +19,14 @@ on:
       - 'v*'
 
 env:
-  IMAGE_NAME: ${{ github.repository }}
-  # 默认值
-  SKIP_DOCKER: "false"
   SNAPSHOT: "false"
 
 jobs:
   release:
-    name: Release Binary and Docker
+    name: Build and Release Binary
     runs-on: ubuntu-latest
-    container:
-      image: goreleaser/goreleaser-cross:v1.24
     permissions:
       contents: write
-      packages: write
       id-token: write
 
     steps:
@@ -46,32 +35,15 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Fix git permissions
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+      
       - name: Install UPX
         uses: crazy-max/ghaction-upx@v3
         with:
           install-only: true
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Prepare for manual build
         if: github.event_name == 'workflow_dispatch'
@@ -79,11 +51,9 @@ jobs:
           # 如果是手动触发，设置标签
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="${{ github.event.inputs.version }}"
-            SKIP_DOCKER="${{ github.event.inputs.skip_docker }}"
             SNAPSHOT="${{ github.event.inputs.snapshot }}"
             
             # 设置环境变量
-            echo "SKIP_DOCKER=$SKIP_DOCKER" >> $GITHUB_ENV
             echo "SNAPSHOT=$SNAPSHOT" >> $GITHUB_ENV
             
             # 设置git标签
@@ -95,12 +65,8 @@ jobs:
         run: |
           GORELEASER_FLAGS="--clean"
           
-          if [[ "$SKIP_DOCKER" == "true" ]]; then
-            GORELEASER_FLAGS="$GORELEASER_FLAGS --skip-docker"
-          fi
-          
           if [[ "$SNAPSHOT" == "true" ]]; then
-            GORELEASER_FLAGS="$GORELEASER_FLAGS --snapshot"
+            GORELEASER_FLAGS="$GORELEASER_FLAGS --skip-publish --snapshot"
           fi
           
           echo "GORELEASER_FLAGS=$GORELEASER_FLAGS" >> $GITHUB_ENV
