@@ -1,39 +1,23 @@
-name: Release
+name: Build Only
 
 on:
-  # 支持手动触发
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号 (格式: v1.2.3)'
+        description: '版本号 (用于文件名，格式: v1.2.3)'
         required: true
         default: 'v0.0.0'
-      snapshot:
-        description: '创建快照版本 (不创建GitHub Release)'
-        required: false
-        type: boolean
-        default: false
-  # 原有标签触发
   push:
-    tags:
-      - 'v*'
-
-env:
-  SNAPSHOT: "false"
+    branches: [ main, master ]
 
 jobs:
-  release:
-    name: Build and Release Binary
+  build:
+    name: Build Binary
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -45,33 +29,22 @@ jobs:
         with:
           install-only: true
 
-      - name: Prepare for manual build
-        if: github.event_name == 'workflow_dispatch'
+      - name: Build with Go
         run: |
-          # 如果是手动触发，设置标签
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
-            SNAPSHOT="${{ github.event.inputs.snapshot }}"
-            
-            # 设置环境变量
-            echo "SNAPSHOT=$SNAPSHOT" >> $GITHUB_ENV
-            
-            # 设置git标签
-            git tag -a "$VERSION" -m "Manual release: $VERSION"
-            git push origin "$VERSION" || true
-          fi
-
-      - name: Set goreleaser flags
-        run: |
-          GORELEASER_FLAGS="--clean"
+          # 设置版本号
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
           
-          if [[ "$SNAPSHOT" == "true" ]]; then
-            GORELEASER_FLAGS="$GORELEASER_FLAGS --skip-publish --snapshot"
-          fi
+          # 编译
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$VERSION" -o myapp ./cmd/myapp
           
-          echo "GORELEASER_FLAGS=$GORELEASER_FLAGS" >> $GITHUB_ENV
-
-      - name: Run GoReleaser
-        run: goreleaser release $GORELEASER_FLAGS
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 使用UPX压缩
+          upx --best myapp
+          
+          # 创建归档
+          tar czf myapp-$VERSION-linux-amd64.tar.gz myapp
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: myapp-*.tar.gz
