@@ -1,12 +1,33 @@
 name: Release
 
 on:
+  # 支持手动触发
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (格式: v1.2.3)'
+        required: true
+        default: 'v0.0.0'
+      skip_docker:
+        description: '跳过Docker构建'
+        required: false
+        type: boolean
+        default: false
+      snapshot:
+        description: '创建快照版本 (不创建GitHub Release)'
+        required: false
+        type: boolean
+        default: false
+  # 原有标签触发
   push:
     tags:
       - 'v*'
 
 env:
   IMAGE_NAME: ${{ github.repository }}
+  # 默认值
+  SKIP_DOCKER: "false"
+  SNAPSHOT: "false"
 
 jobs:
   release:
@@ -52,7 +73,39 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Prepare for manual build
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # 如果是手动触发，设置标签
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            SKIP_DOCKER="${{ github.event.inputs.skip_docker }}"
+            SNAPSHOT="${{ github.event.inputs.snapshot }}"
+            
+            # 设置环境变量
+            echo "SKIP_DOCKER=$SKIP_DOCKER" >> $GITHUB_ENV
+            echo "SNAPSHOT=$SNAPSHOT" >> $GITHUB_ENV
+            
+            # 设置git标签
+            git tag -a "$VERSION" -m "Manual release: $VERSION"
+            git push origin "$VERSION" || true
+          fi
+
+      - name: Set goreleaser flags
+        run: |
+          GORELEASER_FLAGS="--clean"
+          
+          if [[ "$SKIP_DOCKER" == "true" ]]; then
+            GORELEASER_FLAGS="$GORELEASER_FLAGS --skip-docker"
+          fi
+          
+          if [[ "$SNAPSHOT" == "true" ]]; then
+            GORELEASER_FLAGS="$GORELEASER_FLAGS --snapshot"
+          fi
+          
+          echo "GORELEASER_FLAGS=$GORELEASER_FLAGS" >> $GITHUB_ENV
+
       - name: Run GoReleaser
-        run: goreleaser release --clean
+        run: goreleaser release $GORELEASER_FLAGS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
